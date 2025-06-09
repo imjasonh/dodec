@@ -1,0 +1,19 @@
+{
+  "name": "snub-dodecahedron-game",
+  "version": "1.0.0",
+  "description": "A 3D snub dodecahedron game built with Three.js and TypeScript",
+  "main": "game.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "npm run build && open index.html"
+  },
+  "keywords": ["three.js", "typescript", "3d", "game", "polyhedron"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/three": "^0.128.0"
+  },
+  "dependencies": {}
+}
