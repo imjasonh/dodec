@@ -451,6 +451,11 @@ class SnubDodecahedronGame {
     private roverMeshes: Map<Rover, any> = new Map();
     private buildingMeshes: Map<Building, any> = new Map();
     private fortificationMeshes: Map<Fortification, any> = new Map();
+    
+    // UI state
+    private selectedRover: Rover | null = null;
+    private actionMode: 'none' | 'move' | 'shoot' | 'build' = 'none';
+    private pendingMoveFaceId: number | null = null;
 
     constructor(config: GameConfig = DEFAULT_CONFIG) {
         this.config = config;
@@ -628,23 +633,90 @@ class SnubDodecahedronGame {
 
     private onMouseClick(event: MouseEvent): void {
         this.updateMousePosition(event);
-
         this.raycaster.setFromCamera(this.mouse, this.camera);
-        const intersects = this.raycaster.intersectObjects(this.faces);
-
-        if (intersects.length > 0) {
-            const clickedFace = intersects[0].object;
-            this.selectFace(clickedFace);
+        
+        // First check if we clicked on a unit
+        const unitMeshes: any[] = [];
+        this.roverMeshes.forEach(mesh => unitMeshes.push(mesh));
+        this.buildingMeshes.forEach(mesh => unitMeshes.push(mesh));
+        
+        const unitIntersects = this.raycaster.intersectObjects(unitMeshes);
+        
+        if (unitIntersects.length > 0) {
+            const mesh = unitIntersects[0].object;
+            
+            // Find which rover was clicked
+            let clickedRover: Rover | null = null;
+            this.roverMeshes.forEach((roverMesh, rover) => {
+                if (roverMesh === mesh && rover.player === this.gameState.currentPlayer) {
+                    clickedRover = rover;
+                }
+            });
+            
+            if (clickedRover) {
+                this.showActionMenu(clickedRover, event.clientX, event.clientY);
+                return;
+            }
+        }
+        
+        // If we're in move mode, check face clicks
+        if (this.actionMode === 'move' && this.selectedRover) {
+            const faceIntersects = this.raycaster.intersectObjects(this.faces);
+            if (faceIntersects.length > 0) {
+                const clickedFace = faceIntersects[0].object;
+                const userData = clickedFace.userData as FaceUserData;
+                
+                // Check if this is the second click on the same face
+                if (this.pendingMoveFaceId === userData.faceId) {
+                    this.attemptMove(userData.faceId);
+                    this.pendingMoveFaceId = null;
+                } else {
+                    // First click - validate and mark as pending
+                    const adjacentFaces = this.faceAdjacencyMap.get(this.selectedRover.faceId);
+                    if (adjacentFaces && adjacentFaces.has(userData.faceId)) {
+                        // Check if face is valid for movement
+                        const occupiedByRover = this.gameState.rovers.some(r => r.faceId === userData.faceId);
+                        const occupiedByBuilding = this.gameState.buildings.some(b => b.faceId === userData.faceId);
+                        const enemyFortification = this.gameState.fortifications.find(
+                            f => f.faceId === userData.faceId && f.player !== this.gameState.currentPlayer
+                        );
+                        
+                        if (!occupiedByRover && !occupiedByBuilding && !enemyFortification) {
+                            this.pendingMoveFaceId = userData.faceId;
+                            this.showMoveFeedback('Click again to confirm move', true);
+                        } else {
+                            this.showMoveFeedback('Invalid move: face blocked', false);
+                        }
+                    } else {
+                        this.showMoveFeedback('Invalid move: not adjacent', false);
+                    }
+                }
+            }
+        } else {
+            // Otherwise, hide any action menus and reset state
+            this.hideActionMenu();
+            this.selectedRover = null;
+            this.actionMode = 'none';
+            this.pendingMoveFaceId = null;
         }
     }
 
     private onMouseMove(event: MouseEvent): void {
         this.updateMousePosition(event);
 
+        // Check for unit tooltips
+        this.onMouseMoveUnits(event);
+
+        // Check for face highlighting
         this.raycaster.setFromCamera(this.mouse, this.camera);
         const intersects = this.raycaster.intersectObjects(this.faces);
 
         this.resetFaceColors();
+        
+        // Show valid moves if in move mode
+        if (this.actionMode === 'move' && this.selectedRover) {
+            this.highlightValidMoves();
+        }
 
         if (intersects.length > 0) {
             this.highlightHoveredFace(intersects[0].object);
@@ -679,9 +751,7 @@ class SnubDodecahedronGame {
     }
 
     private selectFace(face: any): void {
-        this.deselectCurrentFace();
-        this.setSelectedFace(face);
-        this.onFaceSelected(face);
+        // No longer used for face selection
     }
 
     private deselectCurrentFace(): void {
@@ -702,12 +772,7 @@ class SnubDodecahedronGame {
     }
 
     protected onFaceSelected(face: any): void {
-        const userData = face.userData as FaceUserData;
-        const faceId = userData.faceId;
-
-        if (this.gameState.gameStarted) {
-            this.attemptMove(faceId);
-        }
+        // No longer used
     }
 
     private setupGame(): void {
@@ -784,30 +849,35 @@ class SnubDodecahedronGame {
             face.geometry.boundingBox.getCenter(center);
             face.localToWorld(center);
             
-            // Offset slightly outward from face
+            // Get the normal vector (pointing outward from center)
             const normal = center.clone().normalize();
+            
+            // Offset slightly outward from face
             center.add(normal.multiplyScalar(0.1));
             
             mesh.position.copy(center);
+            
+            // Make the cone point outward from the center
+            // The cone's default orientation is pointing up along Y axis
+            // We need to rotate it to point along the normal vector
+            mesh.lookAt(center.clone().add(normal));
+            
+            // The lookAt makes the cone's Z axis point at the target
+            // But cones point along Y axis, so we need to rotate 90 degrees around X
+            mesh.rotateX(Math.PI / 2);
         }
     }
     
     private attemptMove(targetFaceId: number): void {
-        // Find the current player's rovers
-        const currentRovers = this.gameState.rovers.filter(r => r.player === this.gameState.currentPlayer);
-        
-        if (currentRovers.length === 0) {
-            console.log('No rovers to move');
+        if (!this.selectedRover) {
+            console.log('No rover selected');
             return;
         }
         
-        // For now, move the first rover (later we'll need UI to select which rover)
-        const rover = currentRovers[0];
-        
         // Check if move is valid (adjacent face)
-        const adjacentFaces = this.faceAdjacencyMap.get(rover.faceId);
+        const adjacentFaces = this.faceAdjacencyMap.get(this.selectedRover.faceId);
         if (!adjacentFaces || !adjacentFaces.has(targetFaceId)) {
-            console.log('Invalid move: not adjacent');
+            this.showMoveFeedback('Invalid move: not adjacent', false);
             return;
         }
         
@@ -816,7 +886,7 @@ class SnubDodecahedronGame {
         const occupiedByBuilding = this.gameState.buildings.some(b => b.faceId === targetFaceId);
         
         if (occupiedByRover || occupiedByBuilding) {
-            console.log('Invalid move: face occupied');
+            this.showMoveFeedback('Invalid move: face occupied', false);
             return;
         }
         
@@ -826,17 +896,71 @@ class SnubDodecahedronGame {
         );
         
         if (enemyFortification) {
-            console.log('Invalid move: enemy fortification blocks movement');
+            this.showMoveFeedback('Invalid move: enemy fortification', false);
             return;
         }
         
         // Make the move
-        rover.faceId = targetFaceId;
+        this.selectedRover.faceId = targetFaceId;
         this.gameState.moveHistory.push(`${this.gameState.currentPlayer} moved rover to ${targetFaceId}`);
         this.updateAllUnitPositions();
         
+        // Reset action mode
+        this.selectedRover = null;
+        this.actionMode = 'none';
+        this.pendingMoveFaceId = null;
+        
         // Switch players
         this.endTurn();
+    }
+    
+    private showMoveFeedback(message: string, success: boolean): void {
+        const feedback = document.createElement('div');
+        feedback.style.position = 'absolute';
+        feedback.style.top = '60%';
+        feedback.style.left = '50%';
+        feedback.style.transform = 'translate(-50%, -50%)';
+        feedback.style.backgroundColor = success ? 'rgba(76, 175, 80, 0.9)' : 'rgba(244, 67, 54, 0.9)';
+        feedback.style.color = 'white';
+        feedback.style.padding = '15px';
+        feedback.style.borderRadius = '5px';
+        feedback.style.fontSize = '16px';
+        feedback.style.zIndex = '1002';
+        feedback.textContent = message;
+        
+        document.body.appendChild(feedback);
+        
+        setTimeout(() => {
+            feedback.remove();
+        }, 1500);
+    }
+    
+    private highlightValidMoves(): void {
+        if (!this.selectedRover) return;
+        
+        const adjacentFaces = this.faceAdjacencyMap.get(this.selectedRover.faceId);
+        if (!adjacentFaces) return;
+        
+        adjacentFaces.forEach(faceId => {
+            // Check if face is occupied
+            const occupiedByRover = this.gameState.rovers.some(r => r.faceId === faceId);
+            const occupiedByBuilding = this.gameState.buildings.some(b => b.faceId === faceId);
+            const enemyFortification = this.gameState.fortifications.find(
+                f => f.faceId === faceId && f.player !== this.gameState.currentPlayer
+            );
+            
+            if (!occupiedByRover && !occupiedByBuilding && !enemyFortification && this.faces[faceId]) {
+                if (this.pendingMoveFaceId === faceId) {
+                    // Highlight pending move with a bright yellow
+                    this.faces[faceId].material.color.setHex(0xFFEB3B);
+                    this.faces[faceId].material.opacity = 0.9;
+                } else {
+                    // Highlight as valid move with a green tint
+                    this.faces[faceId].material.color.setHex(0x4CAF50);
+                    this.faces[faceId].material.opacity = 0.8;
+                }
+            }
+        });
     }
     
     private endTurn(): void {
@@ -927,6 +1051,168 @@ class SnubDodecahedronGame {
 
         this.controls.update();
         this.renderer.render(this.scene, this.camera);
+    }
+    
+    private onMouseMoveUnits(event: MouseEvent): void {
+        this.updateMousePosition(event);
+        this.raycaster.setFromCamera(this.mouse, this.camera);
+        
+        // Check for unit intersections
+        const unitMeshes: any[] = [];
+        this.roverMeshes.forEach(mesh => unitMeshes.push(mesh));
+        this.buildingMeshes.forEach(mesh => unitMeshes.push(mesh));
+        
+        const intersects = this.raycaster.intersectObjects(unitMeshes);
+        
+        if (intersects.length > 0) {
+            const mesh = intersects[0].object;
+            
+            // Find which unit this mesh belongs to
+            let unitInfo = '';
+            
+            this.roverMeshes.forEach((roverMesh, rover) => {
+                if (roverMesh === mesh) {
+                    unitInfo = `${rover.player.toUpperCase()} Rover - HP: ${rover.hitPoints}/${rover.maxHitPoints}`;
+                }
+            });
+            
+            this.buildingMeshes.forEach((buildingMesh, building) => {
+                if (buildingMesh === mesh) {
+                    const buildingName = building.buildingType.charAt(0).toUpperCase() + building.buildingType.slice(1);
+                    unitInfo = `${building.player.toUpperCase()} ${buildingName} - HP: ${building.hitPoints}/${building.maxHitPoints}`;
+                }
+            });
+            
+            if (unitInfo) {
+                this.showTooltip(event.clientX, event.clientY, unitInfo);
+            }
+        } else {
+            this.hideTooltip();
+        }
+    }
+    
+    private showTooltip(x: number, y: number, text: string): void {
+        let tooltip = document.getElementById('unit-tooltip');
+        if (!tooltip) {
+            tooltip = document.createElement('div');
+            tooltip.id = 'unit-tooltip';
+            tooltip.style.position = 'absolute';
+            tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+            tooltip.style.color = 'white';
+            tooltip.style.padding = '5px 10px';
+            tooltip.style.borderRadius = '5px';
+            tooltip.style.fontSize = '14px';
+            tooltip.style.pointerEvents = 'none';
+            tooltip.style.zIndex = '1000';
+            document.body.appendChild(tooltip);
+        }
+        
+        tooltip.textContent = text;
+        tooltip.style.display = 'block';
+        tooltip.style.left = `${x + 10}px`;
+        tooltip.style.top = `${y - 30}px`;
+    }
+    
+    private hideTooltip(): void {
+        const tooltip = document.getElementById('unit-tooltip');
+        if (tooltip) {
+            tooltip.style.display = 'none';
+        }
+    }
+    
+    private showActionMenu(rover: Rover, x: number, y: number): void {
+        this.selectedRover = rover;
+        this.actionMode = 'none';
+        
+        // Remove any existing action menu
+        this.hideActionMenu();
+        
+        const menu = document.createElement('div');
+        menu.id = 'action-menu';
+        menu.style.position = 'absolute';
+        menu.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+        menu.style.border = '2px solid #42A5F5';
+        menu.style.borderRadius = '5px';
+        menu.style.padding = '10px';
+        menu.style.zIndex = '1001';
+        menu.style.left = `${x + 10}px`;
+        menu.style.top = `${y + 10}px`;
+        
+        const title = document.createElement('div');
+        title.style.color = 'white';
+        title.style.marginBottom = '10px';
+        title.style.fontWeight = 'bold';
+        title.textContent = `${rover.player.toUpperCase()} Rover`;
+        menu.appendChild(title);
+        
+        const actions = [
+            { name: 'Move', action: 'move', enabled: true },
+            { name: 'Shoot', action: 'shoot', enabled: false },
+            { name: 'Build', action: 'build', enabled: false }
+        ];
+        
+        actions.forEach(actionData => {
+            const button = document.createElement('button');
+            button.textContent = actionData.name;
+            button.style.display = 'block';
+            button.style.width = '100px';
+            button.style.margin = '5px 0';
+            button.style.padding = '5px';
+            button.style.backgroundColor = actionData.enabled ? '#2196F3' : '#555';
+            button.style.color = 'white';
+            button.style.border = 'none';
+            button.style.borderRadius = '3px';
+            button.style.cursor = actionData.enabled ? 'pointer' : 'not-allowed';
+            button.disabled = !actionData.enabled;
+            
+            if (actionData.enabled) {
+                button.addEventListener('click', () => {
+                    this.actionMode = actionData.action as any;
+                    this.hideActionMenu();
+                    this.showActionFeedback(actionData.name);
+                });
+                
+                button.addEventListener('mouseenter', () => {
+                    button.style.backgroundColor = '#42A5F5';
+                });
+                
+                button.addEventListener('mouseleave', () => {
+                    button.style.backgroundColor = '#2196F3';
+                });
+            }
+            
+            menu.appendChild(button);
+        });
+        
+        document.body.appendChild(menu);
+    }
+    
+    private hideActionMenu(): void {
+        const menu = document.getElementById('action-menu');
+        if (menu) {
+            menu.remove();
+        }
+    }
+    
+    private showActionFeedback(action: string): void {
+        const feedback = document.createElement('div');
+        feedback.style.position = 'absolute';
+        feedback.style.top = '50%';
+        feedback.style.left = '50%';
+        feedback.style.transform = 'translate(-50%, -50%)';
+        feedback.style.backgroundColor = 'rgba(33, 150, 243, 0.9)';
+        feedback.style.color = 'white';
+        feedback.style.padding = '20px';
+        feedback.style.borderRadius = '5px';
+        feedback.style.fontSize = '18px';
+        feedback.style.zIndex = '1002';
+        feedback.textContent = `${action} mode: Click an adjacent face twice to confirm`;
+        
+        document.body.appendChild(feedback);
+        
+        setTimeout(() => {
+            feedback.remove();
+        }, 2000);
     }
 }
 
