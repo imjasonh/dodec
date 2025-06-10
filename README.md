@@ -1,8 +1,24 @@
-# Snub Dodecahedron Game
+# Globetrotter
 
-A 3D interactive snub dodecahedron game built with Three.js and TypeScript.
+A 3D strategy game played on a snub dodecahedron planet. Control rovers to explore, conquer, and defend territories while building structures and engaging in tactical combat.
 
-## Development
+## Play Online
+
+Once GitHub Pages is set up, the game will be available at:
+`https://[your-username].github.io/dodec/`
+
+## Setup GitHub Pages
+
+1. Go to your repository on GitHub
+2. Click on "Settings" tab
+3. Scroll down to "Pages" in the left sidebar
+4. Under "Build and deployment":
+   - Source: Select "GitHub Actions"
+5. Push to main branch or manually trigger the workflow
+6. Wait a few minutes for the deployment
+7. Your game will be live at the URL above!
+
+## Local Development
 
 ### Prerequisites
 
@@ -36,16 +52,30 @@ A 3D interactive snub dodecahedron game built with Three.js and TypeScript.
 - `tsconfig.json` - TypeScript configuration
 - `package.json` - Project configuration and dependencies
 
-## Features
+## Game Features
 
-- 3D snub dodecahedron with mathematical precision
+- 3D snub dodecahedron game board (92 faces)
+- Turn-based strategy for 2 players (Red vs Green)
+- Pentagon faces are strategic HQ spaces
+- Move, shoot, and fortify actions
+- Range-based combat with dice rolls
+- Fortifications block enemy movement
+- Win by eliminating all enemy rovers
+
+## Game Controls
+
+- **Rotate Globe**: Click and drag
+- **Zoom**: Scroll or pinch (limited range)
+- **Select Unit**: Click on your rover
+- **Move**: Click Move → Click adjacent face twice
+- **Shoot**: Click Shoot → Click enemy within range
+- **Fortify**: Click Fortify → Click empty adjacent space
+
+## Technical Features
+
+- Built with Three.js and TypeScript
+- Mathematical precision (60 vertices, 150 edges)
 - Mouse rotation controls
 - Face selection and highlighting
 - Click interactions for game logic
 - TypeScript for type safety
-
-## Game Controls
-
-- **Drag** - Rotate the polyhedron
-- **Click faces** - Select faces (red highlight)
-- **Hover** - Face highlighting (yellow) and info display
