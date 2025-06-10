@@ -483,7 +483,7 @@ class SnubDodecahedronGame {
     
     // UI state
     private selectedRover: Rover | null = null;
-    private actionMode: 'none' | 'move' | 'shoot' | 'build' = 'none';
+    private actionMode: 'none' | 'move' | 'shoot' | 'fortify' = 'none';
     private pendingMoveFaceId: number | null = null;
 
     constructor(config: GameConfig = DEFAULT_CONFIG) {
@@ -544,6 +544,10 @@ class SnubDodecahedronGame {
         this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.05;
+        
+        // Set zoom limits
+        this.controls.minDistance = 2.5;  // Don't get closer than this
+        this.controls.maxDistance = 15;   // Don't get farther than this
     }
 
     private createSnubDodecahedronVertices(): any[] {
@@ -728,6 +732,14 @@ class SnubDodecahedronGame {
                 const target = enemyTargets[0];
                 this.attemptShoot(target);
             }
+        } else if (this.actionMode === 'fortify' && this.selectedRover) {
+            // Check if we clicked on a valid face for fortification
+            const faceIntersects = this.raycaster.intersectObjects(this.faces);
+            if (faceIntersects.length > 0) {
+                const clickedFace = faceIntersects[0].object;
+                const userData = clickedFace.userData as FaceUserData;
+                this.attemptFortify(userData.faceId);
+            }
         } else {
             // Otherwise, hide any action menus and reset state
             this.hideActionMenu();
@@ -754,6 +766,8 @@ class SnubDodecahedronGame {
             this.highlightValidMoves();
         } else if (this.actionMode === 'shoot' && this.selectedRover) {
             this.highlightValidTargets();
+        } else if (this.actionMode === 'fortify' && this.selectedRover) {
+            this.highlightValidFortificationSpots();
         }
 
         if (intersects.length > 0) {
@@ -789,6 +803,12 @@ class SnubDodecahedronGame {
         this.buildingMeshes.forEach((mesh, building) => {
             mesh.material.color.setHex(
                 building.player === 'red' ? this.config.colors.playerRed : this.config.colors.playerGreen
+            );
+        });
+        
+        this.fortificationMeshes.forEach((mesh, fortification) => {
+            mesh.material.color.setHex(
+                fortification.player === 'red' ? 0x8B0000 : 0x006400
             );
         });
     }
@@ -1053,6 +1073,101 @@ class SnubDodecahedronGame {
                 }
             }
         });
+        
+        this.gameState.fortifications.forEach(fortification => {
+            if (fortification.player !== this.gameState.currentPlayer) {
+                const distance = SnubDodecahedronGeometry.calculateDistance(
+                    this.selectedRover!.faceId,
+                    fortification.faceId,
+                    this.faceAdjacencyMap
+                );
+                
+                if (distance > 0 && distance <= maxRange) {
+                    const mesh = this.fortificationMeshes.get(fortification);
+                    if (mesh) {
+                        mesh.material.color.setHex(0xFF5722); // Orange for valid targets
+                    }
+                }
+            }
+        });
+    }
+    
+    private highlightValidFortificationSpots(): void {
+        if (!this.selectedRover) return;
+        
+        const adjacentFaces = this.faceAdjacencyMap.get(this.selectedRover.faceId);
+        if (!adjacentFaces) return;
+        
+        adjacentFaces.forEach(faceId => {
+            // Check if face is empty (no units, buildings, or fortifications)
+            const occupiedByRover = this.gameState.rovers.some(r => r.faceId === faceId);
+            const occupiedByBuilding = this.gameState.buildings.some(b => b.faceId === faceId);
+            const occupiedByFortification = this.gameState.fortifications.some(f => f.faceId === faceId);
+            
+            if (!occupiedByRover && !occupiedByBuilding && !occupiedByFortification && this.faces[faceId]) {
+                // Highlight as valid fortification spot with a brown/tan color
+                this.faces[faceId].material.color.setHex(0x8D6E63);
+                this.faces[faceId].material.opacity = 0.8;
+            }
+        });
+    }
+    
+    private attemptFortify(targetFaceId: number): void {
+        if (!this.selectedRover) return;
+        
+        // Check if face is adjacent
+        const adjacentFaces = this.faceAdjacencyMap.get(this.selectedRover.faceId);
+        if (!adjacentFaces || !adjacentFaces.has(targetFaceId)) {
+            this.showMoveFeedback('Can only fortify adjacent spaces', false);
+            return;
+        }
+        
+        // Check if face is empty
+        const occupiedByRover = this.gameState.rovers.some(r => r.faceId === targetFaceId);
+        const occupiedByBuilding = this.gameState.buildings.some(b => b.faceId === targetFaceId);
+        const occupiedByFortification = this.gameState.fortifications.some(f => f.faceId === targetFaceId);
+        
+        if (occupiedByRover || occupiedByBuilding || occupiedByFortification) {
+            this.showMoveFeedback('Cannot fortify occupied space', false);
+            return;
+        }
+        
+        // Create fortification
+        const fortification: Fortification = {
+            type: 'fortification',
+            player: this.gameState.currentPlayer,
+            faceId: targetFaceId,
+            hitPoints: GAME_CONSTANTS.FORTIFICATION_HP
+        };
+        
+        this.gameState.fortifications.push(fortification);
+        this.createFortificationMesh(fortification);
+        
+        // Update UI
+        this.updateUI();
+        this.showMoveFeedback('Fortification built!', true);
+        
+        // Reset action mode
+        this.selectedRover = null;
+        this.actionMode = 'none';
+        
+        // End turn after fortifying
+        this.endTurn();
+    }
+    
+    private createFortificationMesh(fortification: Fortification): void {
+        // Create a cube shape for fortification
+        const geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+        const material = new THREE.MeshLambertMaterial({
+            color: fortification.player === 'red' ? 0x8B0000 : 0x006400 // Dark red or dark green
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        
+        // Position it on the face
+        this.positionUnitOnFace(mesh, fortification.faceId);
+        
+        this.fortificationMeshes.set(fortification, mesh);
+        this.scene.add(mesh);
     }
     
     private endTurn(): void {
@@ -1240,7 +1355,7 @@ class SnubDodecahedronGame {
         const actions = [
             { name: 'Move', action: 'move', enabled: true },
             { name: 'Shoot', action: 'shoot', enabled: true },
-            { name: 'Build', action: 'build', enabled: false }
+            { name: 'Fortify', action: 'fortify', enabled: true }
         ];
         
         actions.forEach(actionData => {
@@ -1305,6 +1420,8 @@ class SnubDodecahedronGame {
         } else if (action === 'Shoot') {
             const range = this.getShootingRange();
             message = `${action} mode: Click an enemy unit within ${range} spaces`;
+        } else if (action === 'Fortify') {
+            message = `${action} mode: Click an empty adjacent space`;
         } else {
             message = `${action} mode activated`;
         }
@@ -1318,12 +1435,12 @@ class SnubDodecahedronGame {
         }, 2000);
     }
     
-    private getEnemyTargetsAtClick(event: MouseEvent): (Rover | Building)[] {
+    private getEnemyTargetsAtClick(event: MouseEvent): (Rover | Building | Fortification)[] {
         this.updateMousePosition(event);
         this.raycaster.setFromCamera(this.mouse, this.camera);
         
         const unitMeshes: any[] = [];
-        const units: (Rover | Building)[] = [];
+        const units: (Rover | Building | Fortification)[] = [];
         
         // Check enemy rovers
         this.roverMeshes.forEach((mesh, rover) => {
@@ -1341,8 +1458,16 @@ class SnubDodecahedronGame {
             }
         });
         
+        // Check enemy fortifications
+        this.fortificationMeshes.forEach((mesh, fortification) => {
+            if (fortification.player !== this.gameState.currentPlayer) {
+                unitMeshes.push(mesh);
+                units.push(fortification);
+            }
+        });
+        
         const intersects = this.raycaster.intersectObjects(unitMeshes);
-        const targets: (Rover | Building)[] = [];
+        const targets: (Rover | Building | Fortification)[] = [];
         
         if (intersects.length > 0) {
             const hitMesh = intersects[0].object;
@@ -1359,12 +1484,18 @@ class SnubDodecahedronGame {
                     targets.push(building);
                 }
             });
+            
+            this.fortificationMeshes.forEach((mesh, fortification) => {
+                if (mesh === hitMesh && fortification.player !== this.gameState.currentPlayer) {
+                    targets.push(fortification);
+                }
+            });
         }
         
         return targets;
     }
     
-    private attemptShoot(target: Rover | Building): void {
+    private attemptShoot(target: Rover | Building | Fortification): void {
         if (!this.selectedRover) return;
         
         // Calculate distance
@@ -1402,7 +1533,7 @@ class SnubDodecahedronGame {
                             this.roverMeshes.delete(target as Rover);
                         }
                     }
-                } else {
+                } else if (target.type === 'building') {
                     const index = this.gameState.buildings.indexOf(target as Building);
                     if (index > -1) {
                         this.gameState.buildings.splice(index, 1);
@@ -1410,6 +1541,16 @@ class SnubDodecahedronGame {
                         if (mesh) {
                             this.scene.remove(mesh);
                             this.buildingMeshes.delete(target as Building);
+                        }
+                    }
+                } else if (target.type === 'fortification') {
+                    const index = this.gameState.fortifications.indexOf(target as Fortification);
+                    if (index > -1) {
+                        this.gameState.fortifications.splice(index, 1);
+                        const mesh = this.fortificationMeshes.get(target as Fortification);
+                        if (mesh) {
+                            this.scene.remove(mesh);
+                            this.fortificationMeshes.delete(target as Fortification);
                         }
                     }
                 }

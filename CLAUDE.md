@@ -1,88 +1,110 @@
-# Claude Code Context
+# Snub Dodecahedron Game Project
 
-## Project Overview
-Globetrotter - A 3D strategy game for 2+ players played on a snub dodecahedron planet. Players control Rovers to explore, conquer, and defend territories while building structures and engaging in tactical combat.
+## Overview
+This is a 3D strategy game called "Globetrotter" based on a snub dodecahedron polyhedron with 92 faces (12 pentagons + 80 triangles).
 
-## Key Learnings
+## Technical Stack
+- Three.js for 3D rendering (loaded via CDN)
+- TypeScript for source code
+- Simple HTML/CSS for UI
+- NPM for build process
 
-### Snub Dodecahedron Geometry
-- Also known as "snub icosidodecahedron" in mathematical literature
-- Has exactly 92 faces: 12 regular pentagons and 80 equilateral triangles
-- 60 vertices and 150 edges
-- Vertex and face data sourced from George Hart's Virtual Polyhedra via the `polyhedra` npm package
+## Project Structure
+```
+dodec/
+├── index.html      # Main HTML file with Three.js CDN imports
+├── game.ts         # TypeScript source file
+├── game.js         # Compiled JavaScript (generated)
+├── package.json    # NPM configuration
+├── tsconfig.json   # TypeScript configuration
+└── CLAUDE.md       # This file
+```
 
-### Technical Implementation
-1. **Face Rendering**: Each face is rendered as a separate mesh to enable individual interaction
-2. **Pentagon Triangulation**: Pentagons are triangulated using a fan pattern from vertex 0
-3. **Transparency Issues**: Setting `transparent: true` in Three.js can cause rendering artifacts even with `opacity: 1.0`. Solution: use `transparent: false` for opaque materials
-4. **Lighting**: Ambient light intensity of 1.8 provides good visibility on all sides
+## Key Features Implemented
+1. **Polyhedron Rendering**: Accurate snub dodecahedron with 60 vertices, 92 faces
+2. **Face Selection**: Click to select faces, visual feedback with colors
+3. **Camera Controls**: Orbit controls with zoom limits (2.5-15 units)
+4. **TypeScript Architecture**: Clean, modular code with proper types
+5. **Face Data**: Exact vertex and face connectivity from polyhedra npm package
+6. **Game State**: 2-player turn-based system with serializable state
+7. **Unit Movement**: Rovers move to adjacent spaces with double-click confirmation
+8. **Visual Styling**: Gray color scheme with blue selection highlights
+9. **Shooting**: Range-based combat (3 spaces, +2 from HQ), 1d6 roll (4+ hits)
+10. **Fortifications**: Build cube barriers that block enemy movement
+11. **Action Menu**: Click rover for Move/Shoot/Fortify options
+12. **Tooltips**: Hover over units to see HP information
+13. **UI Feedback**: Messages appear at bottom of screen
 
-### Project Structure
-- `game.ts`: Main TypeScript source with embedded polyhedra data
-- `game.js`: Compiled JavaScript (gitignored)
-- `index.html`: Simple HTML with Three.js CDN imports
-- Build: `npx tsc` compiles TypeScript to JavaScript
+## Game Rules Status
 
-### Current Features
-- ✅ Mathematically accurate snub dodecahedron with 92 faces
-- ✅ 12 Pentagon spaces serve as HQ locations
-- ✅ 80 Triangle spaces for regular gameplay
-- ✅ Interactive rotation with mouse drag
-- ✅ Face selection and highlighting
-- ✅ Two-player turn-based strategy (red vs green)
-- ✅ Rovers with 5 hit points each
-- ✅ Movement to adjacent faces only
-- ✅ Collision detection (units cannot stack)
-- ✅ Enemy fortifications block movement
-- ✅ Win/loss conditions implemented
-- ✅ Game state serialization for save/load
+### Implemented ✓
+- Basic 2-player turn system (red/green)
+- Rovers with 5 HP that can move to adjacent spaces
+- Pentagon faces are HQ spaces
+- Shooting with range calculation and dice rolls
+- Fortifications (1 HP, block enemy movement)
+- Win condition: eliminate all enemy rovers
+- HQ bonus: +2 shooting range from pentagon spaces
+- Visual feedback for valid moves/targets
 
-### Development Commands
-- Build: `npm run build` or `npx tsc`
-- Dev mode: `npm run dev` (watches for changes)
-- Open game: `open index.html` or `npm start`
+### Not Yet Implemented ✗
+1. **Multiple Rovers**: 
+   - Start with 1 rover each, can build more at Factory
+   - UI to select which rover to control
 
-### Dependencies
-- TypeScript (dev)
-- @types/three (dev)
-- polyhedra (for geometry data)
+2. **Buildings**:
+   - **Space Port**: Move to any space, can traverse enemy fortifications
+   - **Factory**: Build new rovers (max 5 HP)
+   - **Drill Cannon**: Damage all units on a space, destroy planet at 8 shots
+   - **Treasury**: Store action points (max 3)
 
-## Game Rules (Globetrotter)
+3. **Action Points**:
+   - Only used by Treasury buildings
+   - Spend to shoot twice or move+shoot in one turn
 
-### Setup
-- Each player starts with one Rover in a random HQ (pentagon) space
-- Rovers have 5 hit points
+4. **Advanced Combat**:
+   - Shooting through fortifications
+   - Multi-unit combat on same space
+   - Drill Cannon planet destruction
 
-### On Your Turn (Choose One Action)
-1. **Move**: Move a Rover to an adjacent space
-2. **Fortify**: Place a fortification (not yet implemented)
-3. **Shoot**: Attack enemy units within 3 spaces (not yet implemented)
-4. **Build**: Construct buildings in HQ spaces (not yet implemented)
-5. **Destroy**: Remove HQ buildings (not yet implemented)
+5. **Special Rules**:
+   - Can't build on HQ spaces
+   - Factory produces rovers on adjacent spaces
+   - Buildings can't move but can be destroyed
 
-### Movement Rules
-- Rovers move 1 space to adjacent faces
-- Cannot move through enemy fortifications
-- Cannot stack units on same space
+## Color Scheme
+- Triangles: Light gray (#BDBDBD)
+- Pentagons: Medium gray (#9E9E9E)  
+- Selection: Medium blue (#2196F3)
+- Hover: Light blue (#42A5F5)
+- Background: Dark (#111111)
+- Player colors: Red (#F44336), Green (#4CAF50)
+- Fortifications: Dark red (#8B0000), Dark green (#006400)
+- Valid targets: Orange (#FF5722)
+- Valid moves: Green (#4CAF50)
+- Pending move: Yellow (#FFEB3B)
 
-### Victory Conditions
-- Eliminate all enemy Rovers AND they have no Factory to build new ones
-- If all players lose simultaneously, everyone loses
-- Planet destruction (8+ drill cannon shots) ends game
+## Build Process
+```bash
+npm run build   # Compile TypeScript to JavaScript
+npm run watch   # Watch mode for development
+```
 
-## API Methods
-- `exportGameState()`: Returns serialized game data for saving
-- `importGameState(data)`: Loads a saved game state
+## Controls
+- Click and drag to rotate globe
+- Scroll/pinch to zoom (limited 2.5-15 units)
+- Click your rover to see action menu
+- Click action button then target to execute
+- Move requires double-click confirmation
 
-## Not Yet Implemented
-- Fortification placement and mechanics
-- Shooting/combat system (range calculation, dice rolls)
-- Building construction (Space Port, Factory, Drill Cannon, Treasury)
-- Special building abilities
-- Action point storage (Treasury)
-- Rover production (Factory)
-- Orbital mechanics (Space Port)
-- Drill Cannon charging/firing
-- Multi-rover selection UI
-- Visual indicators for valid moves
-- Sound effects and animations
+## Next Priority Tasks
+1. [ ] Building construction UI and mechanics
+2. [ ] Multiple rover management
+3. [ ] Space Port implementation
+4. [ ] Factory rover production
+5. [ ] Drill Cannon mechanics
+6. [ ] Treasury and action points
+7. [ ] Save/load game state
+8. [ ] Sound effects
+9. [ ] Victory screen
+10. [ ] Network multiplayer
