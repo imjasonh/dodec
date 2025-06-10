@@ -2,6 +2,17 @@
 const GOLDEN_RATIO = (1 + Math.sqrt(5)) / 2;
 const XI_CONSTANT = 0.94315125924; // Real zero of x³ + 2x² - φ² = 0
 
+// Game constants
+const GAME_CONSTANTS = {
+    ROVER_MAX_HP: 5,
+    BUILDING_MAX_HP: 5,
+    FORTIFICATION_HP: 1,
+    SHOOT_RANGE: 3,
+    HQ_RANGE_COST: 2,
+    DRILL_CANNON_PLANET_DESTROY_THRESHOLD: 8,
+    TREASURY_MAX_POINTS: 3
+};
+
 // Three.js types - global declaration for CDN usage
 declare const THREE: any;
 
@@ -69,15 +80,45 @@ interface SnubDodecahedronData {
 
 // Game state types
 type Player = 'red' | 'green';
+type SpaceType = 'triangle' | 'pentagon';
+type BuildingType = 'spaceport' | 'factory' | 'drillcannon' | 'treasury';
+
+interface Unit {
+    player: Player;
+    hitPoints: number;
+    maxHitPoints: number;
+}
+
+interface Rover extends Unit {
+    type: 'rover';
+    faceId: number;
+}
+
+interface Building extends Unit {
+    type: 'building';
+    buildingType: BuildingType;
+    faceId: number;
+}
+
+interface Fortification {
+    type: 'fortification';
+    player: Player;
+    faceId: number;
+    hitPoints: number;
+}
 
 interface GameState {
     currentPlayer: Player;
-    playerPositions: {
+    rovers: Rover[];
+    buildings: Building[];
+    fortifications: Fortification[];
+    moveHistory: string[];
+    gameStarted: boolean;
+    actionPointsStored: {
         red: number;
         green: number;
     };
-    moveHistory: number[];
-    gameStarted: boolean;
+    drillCannonShots: number;
 }
 
 // Serializable game data for network/save
@@ -308,6 +349,16 @@ class SnubDodecahedronGeometry {
 
         return adjacencyMap;
     }
+    
+    static getFaceType(faceId: number): SpaceType {
+        // First 80 faces are triangles, next 12 are pentagons (HQ spaces)
+        return faceId < 80 ? 'triangle' : 'pentagon';
+    }
+    
+    static getHQSpaces(): number[] {
+        // Pentagon faces start at index 80
+        return Array.from({ length: 12 }, (_, i) => 80 + i);
+    }
 }
 
 // Utility functions (pure and testable)
@@ -364,10 +415,7 @@ class GeometryUtils {
 // UI utilities
 class UIUtils {
     static updateFaceInfo(faceId: number, type: string): void {
-        const faceInfoElement = document.getElementById('face-info');
-        if (faceInfoElement) {
-            faceInfoElement.textContent = `Face: ${faceId} (${type})`;
-        }
+        // Don't update during game - UI is used for game info
     }
 
     static clearFaceInfo(): void {
@@ -400,7 +448,9 @@ class SnubDodecahedronGame {
     // Game state
     private gameState: GameState;
     private faceAdjacencyMap: Map<number, Set<number>>;
-    private playerMeshes: Map<Player, any> = new Map();
+    private roverMeshes: Map<Rover, any> = new Map();
+    private buildingMeshes: Map<Building, any> = new Map();
+    private fortificationMeshes: Map<Fortification, any> = new Map();
 
     constructor(config: GameConfig = DEFAULT_CONFIG) {
         this.config = config;
@@ -413,12 +463,16 @@ class SnubDodecahedronGame {
         // Initialize game state
         this.gameState = {
             currentPlayer: 'red',
-            playerPositions: {
-                red: Math.floor(Math.random() * 92),
-                green: Math.floor(Math.random() * 92)
-            },
+            rovers: [],
+            buildings: [],
+            fortifications: [],
             moveHistory: [],
-            gameStarted: false
+            gameStarted: false,
+            actionPointsStored: {
+                red: 0,
+                green: 0
+            },
+            drillCannonShots: 0
         };
 
         // Build adjacency map
@@ -434,8 +488,7 @@ class SnubDodecahedronGame {
         this.createSnubDodecahedron();
         this.setupLighting();
         this.setupEventListeners();
-        this.createPlayerPieces();
-        this.startGame();
+        this.setupGame();
         this.animate();
     }
 
@@ -657,90 +710,177 @@ class SnubDodecahedronGame {
         }
     }
 
-    private createPlayerPieces(): void {
-        // Create spheres for player pieces
-        const sphereGeometry = new THREE.SphereGeometry(0.1, 32, 16);
-
-        // Red player
-        const redMaterial = new THREE.MeshLambertMaterial({
-            color: this.config.colors.playerRed
-        });
-        const redSphere = new THREE.Mesh(sphereGeometry, redMaterial);
-        this.playerMeshes.set('red', redSphere);
-        this.scene.add(redSphere);
-
-        // Green player
-        const greenMaterial = new THREE.MeshLambertMaterial({
-            color: this.config.colors.playerGreen
-        });
-        const greenSphere = new THREE.Mesh(sphereGeometry, greenMaterial);
-        this.playerMeshes.set('green', greenSphere);
-        this.scene.add(greenSphere);
-
-        // Position players at their starting faces
-        this.updatePlayerPositions();
+    private setupGame(): void {
+        // Get available HQ spaces
+        const hqSpaces = SnubDodecahedronGeometry.getHQSpaces();
+        
+        // Randomly select starting HQ for each player
+        const shuffled = [...hqSpaces].sort(() => Math.random() - 0.5);
+        
+        // Create initial rovers for each player
+        const redRover: Rover = {
+            type: 'rover',
+            player: 'red',
+            faceId: shuffled[0],
+            hitPoints: GAME_CONSTANTS.ROVER_MAX_HP,
+            maxHitPoints: GAME_CONSTANTS.ROVER_MAX_HP
+        };
+        
+        const greenRover: Rover = {
+            type: 'rover', 
+            player: 'green',
+            faceId: shuffled[1],
+            hitPoints: GAME_CONSTANTS.ROVER_MAX_HP,
+            maxHitPoints: GAME_CONSTANTS.ROVER_MAX_HP
+        };
+        
+        this.gameState.rovers.push(redRover, greenRover);
+        
+        // Create visual representations
+        this.createRoverMesh(redRover);
+        this.createRoverMesh(greenRover);
+        
+        // Update positions
+        this.updateAllUnitPositions();
+        
+        // Start the game
+        this.gameState.gameStarted = true;
+        this.updateUI();
     }
-
-    private updatePlayerPositions(): void {
-        ['red', 'green'].forEach((player) => {
-            const playerKey = player as Player;
-            const position = this.gameState.playerPositions[playerKey];
-            const mesh = this.playerMeshes.get(playerKey);
-
-            if (mesh && this.faces[position]) {
-                // Get center of face
-                const face = this.faces[position];
-                const center = new THREE.Vector3();
-                face.geometry.computeBoundingBox();
-                face.geometry.boundingBox.getCenter(center);
-                face.localToWorld(center);
-
-                // Offset slightly outward from face
-                const normal = center.clone().normalize();
-                center.add(normal.multiplyScalar(0.1));
-
-                mesh.position.copy(center);
+    
+    private createRoverMesh(rover: Rover): void {
+        const geometry = new THREE.ConeGeometry(0.15, 0.3, 6);
+        const material = new THREE.MeshLambertMaterial({
+            color: rover.player === 'red' ? this.config.colors.playerRed : this.config.colors.playerGreen
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        this.roverMeshes.set(rover, mesh);
+        this.scene.add(mesh);
+    }
+    
+    private updateAllUnitPositions(): void {
+        // Update rover positions
+        this.gameState.rovers.forEach(rover => {
+            const mesh = this.roverMeshes.get(rover);
+            if (mesh) {
+                this.positionUnitOnFace(mesh, rover.faceId);
+            }
+        });
+        
+        // Update building positions
+        this.gameState.buildings.forEach(building => {
+            const mesh = this.buildingMeshes.get(building);
+            if (mesh) {
+                this.positionUnitOnFace(mesh, building.faceId);
             }
         });
     }
-
+    
+    private positionUnitOnFace(mesh: any, faceId: number): void {
+        if (this.faces[faceId]) {
+            const face = this.faces[faceId];
+            const center = new THREE.Vector3();
+            face.geometry.computeBoundingBox();
+            face.geometry.boundingBox.getCenter(center);
+            face.localToWorld(center);
+            
+            // Offset slightly outward from face
+            const normal = center.clone().normalize();
+            center.add(normal.multiplyScalar(0.1));
+            
+            mesh.position.copy(center);
+        }
+    }
+    
     private attemptMove(targetFaceId: number): void {
-        const currentPlayer = this.gameState.currentPlayer;
-        const currentPosition = this.gameState.playerPositions[currentPlayer];
-
+        // Find the current player's rovers
+        const currentRovers = this.gameState.rovers.filter(r => r.player === this.gameState.currentPlayer);
+        
+        if (currentRovers.length === 0) {
+            console.log('No rovers to move');
+            return;
+        }
+        
+        // For now, move the first rover (later we'll need UI to select which rover)
+        const rover = currentRovers[0];
+        
         // Check if move is valid (adjacent face)
-        const adjacentFaces = this.faceAdjacencyMap.get(currentPosition);
+        const adjacentFaces = this.faceAdjacencyMap.get(rover.faceId);
         if (!adjacentFaces || !adjacentFaces.has(targetFaceId)) {
             console.log('Invalid move: not adjacent');
             return;
         }
-
-        // Check if face is occupied by other player
-        const otherPlayer: Player = currentPlayer === 'red' ? 'green' : 'red';
-        if (this.gameState.playerPositions[otherPlayer] === targetFaceId) {
+        
+        // Check if face is occupied by unit or building
+        const occupiedByRover = this.gameState.rovers.some(r => r.faceId === targetFaceId);
+        const occupiedByBuilding = this.gameState.buildings.some(b => b.faceId === targetFaceId);
+        
+        if (occupiedByRover || occupiedByBuilding) {
             console.log('Invalid move: face occupied');
             return;
         }
-
+        
+        // Check for enemy fortifications
+        const enemyFortification = this.gameState.fortifications.find(
+            f => f.faceId === targetFaceId && f.player !== this.gameState.currentPlayer
+        );
+        
+        if (enemyFortification) {
+            console.log('Invalid move: enemy fortification blocks movement');
+            return;
+        }
+        
         // Make the move
-        this.gameState.playerPositions[currentPlayer] = targetFaceId;
-        this.gameState.moveHistory.push(targetFaceId);
-        this.updatePlayerPositions();
-
+        rover.faceId = targetFaceId;
+        this.gameState.moveHistory.push(`${this.gameState.currentPlayer} moved rover to ${targetFaceId}`);
+        this.updateAllUnitPositions();
+        
         // Switch players
-        this.gameState.currentPlayer = otherPlayer;
-        this.updateUI();
+        this.endTurn();
     }
-
-    private startGame(): void {
-        this.gameState.gameStarted = true;
+    
+    private endTurn(): void {
+        this.gameState.currentPlayer = this.gameState.currentPlayer === 'red' ? 'green' : 'red';
         this.updateUI();
+        this.checkWinConditions();
+    }
+    
+    private checkWinConditions(): void {
+        const redAlive = this.gameState.rovers.some(r => r.player === 'red') || 
+                        this.gameState.buildings.some(b => b.player === 'red' && b.buildingType === 'factory');
+        const greenAlive = this.gameState.rovers.some(r => r.player === 'green') || 
+                          this.gameState.buildings.some(b => b.player === 'green' && b.buildingType === 'factory');
+        
+        if (!redAlive && !greenAlive) {
+            alert('Game Over: Both players eliminated!');
+            this.gameState.gameStarted = false;
+        } else if (!redAlive) {
+            alert('Game Over: Green wins!');
+            this.gameState.gameStarted = false;
+        } else if (!greenAlive) {
+            alert('Game Over: Red wins!');
+            this.gameState.gameStarted = false;
+        }
+        
+        // Check planet destruction
+        if (this.gameState.drillCannonShots >= GAME_CONSTANTS.DRILL_CANNON_PLANET_DESTROY_THRESHOLD) {
+            alert('Game Over: Planet destroyed by drill cannon!');
+            this.gameState.gameStarted = false;
+        }
     }
 
     private updateUI(): void {
         const info = document.getElementById('face-info');
         if (info) {
-            info.textContent = `Current player: ${this.gameState.currentPlayer.toUpperCase()}`;
+            const currentRovers = this.gameState.rovers.filter(r => r.player === this.gameState.currentPlayer);
+            const roverCount = currentRovers.length;
+            const buildingCount = this.gameState.buildings.filter(b => b.player === this.gameState.currentPlayer).length;
+            
+            info.innerHTML = `
+                <strong>Current Turn: ${this.gameState.currentPlayer.toUpperCase()}</strong><br>
+                Rovers: ${roverCount} | Buildings: ${buildingCount}<br>
+                Action Points: ${this.gameState.actionPointsStored[this.gameState.currentPlayer]}
+            `;
         }
     }
 
@@ -754,8 +894,31 @@ class SnubDodecahedronGame {
     }
 
     public importGameState(data: SerializedGameData): void {
+        // Clear existing meshes
+        this.roverMeshes.forEach((mesh, rover) => {
+            this.scene.remove(mesh);
+        });
+        this.buildingMeshes.forEach((mesh, building) => {
+            this.scene.remove(mesh);
+        });
+        this.fortificationMeshes.forEach((mesh, fort) => {
+            this.scene.remove(mesh);
+        });
+        
+        this.roverMeshes.clear();
+        this.buildingMeshes.clear();
+        this.fortificationMeshes.clear();
+        
+        // Load new state
         this.gameState = { ...data.state };
-        this.updatePlayerPositions();
+        
+        // Recreate visual elements
+        this.gameState.rovers.forEach(rover => {
+            this.createRoverMesh(rover);
+        });
+        
+        // Update positions and UI
+        this.updateAllUnitPositions();
         this.updateUI();
     }
 

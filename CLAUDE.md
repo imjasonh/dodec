@@ -1,7 +1,7 @@
 # Claude Code Context
 
 ## Project Overview
-A web-based 3D snub dodecahedron game built with Three.js and TypeScript. The snub dodecahedron is rendered with its mathematically correct 92 faces (12 pentagons + 80 triangles).
+Globetrotter - A 3D strategy game for 2+ players played on a snub dodecahedron planet. Players control Rovers to explore, conquer, and defend territories while building structures and engaging in tactical combat.
 
 ## Key Learnings
 
@@ -25,16 +25,17 @@ A web-based 3D snub dodecahedron game built with Three.js and TypeScript. The sn
 
 ### Current Features
 - ✅ Mathematically accurate snub dodecahedron with 92 faces
+- ✅ 12 Pentagon spaces serve as HQ locations
+- ✅ 80 Triangle spaces for regular gameplay
 - ✅ Interactive rotation with mouse drag
 - ✅ Face selection and highlighting
-- ✅ Different colors for triangles (gray) and pentagons (darker gray)
-- ✅ No visible edges (wireframe opacity = 0)
-- ✅ Bright lighting on all sides
-- ✅ Fully opaque faces
-- ✅ Two-player turn-based game (red vs green)
-- ✅ Players can only move to adjacent faces
-- ✅ Collision detection (players cannot occupy same face)
-- ✅ Game state serialization for save/load functionality
+- ✅ Two-player turn-based strategy (red vs green)
+- ✅ Rovers with 5 hit points each
+- ✅ Movement to adjacent faces only
+- ✅ Collision detection (units cannot stack)
+- ✅ Enemy fortifications block movement
+- ✅ Win/loss conditions implemented
+- ✅ Game state serialization for save/load
 
 ### Development Commands
 - Build: `npm run build` or `npx tsc`
@@ -46,22 +47,42 @@ A web-based 3D snub dodecahedron game built with Three.js and TypeScript. The sn
 - @types/three (dev)
 - polyhedra (for geometry data)
 
-## Game Rules
-- Two players (Red and Green) take turns moving
-- Players start at random positions on the polyhedron
-- On each turn, a player can move to any adjacent face (sharing an edge)
-- Players cannot move to faces occupied by the other player
-- Click on an adjacent face to move there
+## Game Rules (Globetrotter)
+
+### Setup
+- Each player starts with one Rover in a random HQ (pentagon) space
+- Rovers have 5 hit points
+
+### On Your Turn (Choose One Action)
+1. **Move**: Move a Rover to an adjacent space
+2. **Fortify**: Place a fortification (not yet implemented)
+3. **Shoot**: Attack enemy units within 3 spaces (not yet implemented)
+4. **Build**: Construct buildings in HQ spaces (not yet implemented)
+5. **Destroy**: Remove HQ buildings (not yet implemented)
+
+### Movement Rules
+- Rovers move 1 space to adjacent faces
+- Cannot move through enemy fortifications
+- Cannot stack units on same space
+
+### Victory Conditions
+- Eliminate all enemy Rovers AND they have no Factory to build new ones
+- If all players lose simultaneously, everyone loses
+- Planet destruction (8+ drill cannon shots) ends game
 
 ## API Methods
 - `exportGameState()`: Returns serialized game data for saving
 - `importGameState(data)`: Loads a saved game state
 
-## Next Steps
-- Add win conditions
-- Add move history visualization
-- Add undo/redo functionality
-- Add network multiplayer support
-- Add AI opponent
-- Add animations for piece movement
-- Add sound effects
+## Not Yet Implemented
+- Fortification placement and mechanics
+- Shooting/combat system (range calculation, dice rolls)
+- Building construction (Space Port, Factory, Drill Cannon, Treasury)
+- Special building abilities
+- Action point storage (Treasury)
+- Rover production (Factory)
+- Orbital mechanics (Space Port)
+- Drill Cannon charging/firing
+- Multi-rover selection UI
+- Visual indicators for valid moves
+- Sound effects and animations
