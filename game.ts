@@ -359,6 +359,35 @@ class SnubDodecahedronGeometry {
         // Pentagon faces start at index 80
         return Array.from({ length: 12 }, (_, i) => 80 + i);
     }
+    
+    static calculateDistance(from: number, to: number, adjacencyMap: Map<number, Set<number>>): number {
+        // BFS to find shortest path
+        if (from === to) return 0;
+        
+        const visited = new Set<number>();
+        const queue: {face: number, distance: number}[] = [{face: from, distance: 0}];
+        visited.add(from);
+        
+        while (queue.length > 0) {
+            const current = queue.shift()!;
+            const neighbors = adjacencyMap.get(current.face);
+            
+            if (!neighbors) continue;
+            
+            for (const neighbor of neighbors) {
+                if (neighbor === to) {
+                    return current.distance + 1;
+                }
+                
+                if (!visited.has(neighbor)) {
+                    visited.add(neighbor);
+                    queue.push({face: neighbor, distance: current.distance + 1});
+                }
+            }
+        }
+        
+        return -1; // No path found
+    }
 }
 
 // Utility functions (pure and testable)
@@ -659,7 +688,7 @@ class SnubDodecahedronGame {
             }
         }
         
-        // If we're in move mode, check face clicks
+        // If we're in an action mode, check face/unit clicks
         if (this.actionMode === 'move' && this.selectedRover) {
             const faceIntersects = this.raycaster.intersectObjects(this.faces);
             if (faceIntersects.length > 0) {
@@ -692,6 +721,13 @@ class SnubDodecahedronGame {
                     }
                 }
             }
+        } else if (this.actionMode === 'shoot' && this.selectedRover) {
+            // Check if we clicked on an enemy unit
+            const enemyTargets = this.getEnemyTargetsAtClick(event);
+            if (enemyTargets.length > 0) {
+                const target = enemyTargets[0];
+                this.attemptShoot(target);
+            }
         } else {
             // Otherwise, hide any action menus and reset state
             this.hideActionMenu();
@@ -713,9 +749,11 @@ class SnubDodecahedronGame {
 
         this.resetFaceColors();
         
-        // Show valid moves if in move mode
+        // Show valid moves/targets based on action mode
         if (this.actionMode === 'move' && this.selectedRover) {
             this.highlightValidMoves();
+        } else if (this.actionMode === 'shoot' && this.selectedRover) {
+            this.highlightValidTargets();
         }
 
         if (intersects.length > 0) {
@@ -739,6 +777,19 @@ class SnubDodecahedronGame {
             if (face.material.transparent) {
                 face.material.opacity = 1.0;
             }
+        });
+        
+        // Reset unit colors too
+        this.roverMeshes.forEach((mesh, rover) => {
+            mesh.material.color.setHex(
+                rover.player === 'red' ? this.config.colors.playerRed : this.config.colors.playerGreen
+            );
+        });
+        
+        this.buildingMeshes.forEach((mesh, building) => {
+            mesh.material.color.setHex(
+                building.player === 'red' ? this.config.colors.playerRed : this.config.colors.playerGreen
+            );
         });
     }
 
@@ -917,9 +968,9 @@ class SnubDodecahedronGame {
     private showMoveFeedback(message: string, success: boolean): void {
         const feedback = document.createElement('div');
         feedback.style.position = 'absolute';
-        feedback.style.top = '60%';
+        feedback.style.bottom = '80px';
         feedback.style.left = '50%';
-        feedback.style.transform = 'translate(-50%, -50%)';
+        feedback.style.transform = 'translateX(-50%)';
         feedback.style.backgroundColor = success ? 'rgba(76, 175, 80, 0.9)' : 'rgba(244, 67, 54, 0.9)';
         feedback.style.color = 'white';
         feedback.style.padding = '15px';
@@ -958,6 +1009,47 @@ class SnubDodecahedronGame {
                     // Highlight as valid move with a green tint
                     this.faces[faceId].material.color.setHex(0x4CAF50);
                     this.faces[faceId].material.opacity = 0.8;
+                }
+            }
+        });
+    }
+    
+    private highlightValidTargets(): void {
+        if (!this.selectedRover) return;
+        
+        const maxRange = this.getShootingRange();
+        
+        // Highlight enemy units in range
+        this.gameState.rovers.forEach(rover => {
+            if (rover.player !== this.gameState.currentPlayer) {
+                const distance = SnubDodecahedronGeometry.calculateDistance(
+                    this.selectedRover!.faceId,
+                    rover.faceId,
+                    this.faceAdjacencyMap
+                );
+                
+                if (distance > 0 && distance <= maxRange) {
+                    const mesh = this.roverMeshes.get(rover);
+                    if (mesh) {
+                        mesh.material.color.setHex(0xFF5722); // Orange for valid targets
+                    }
+                }
+            }
+        });
+        
+        this.gameState.buildings.forEach(building => {
+            if (building.player !== this.gameState.currentPlayer) {
+                const distance = SnubDodecahedronGeometry.calculateDistance(
+                    this.selectedRover!.faceId,
+                    building.faceId,
+                    this.faceAdjacencyMap
+                );
+                
+                if (distance > 0 && distance <= maxRange) {
+                    const mesh = this.buildingMeshes.get(building);
+                    if (mesh) {
+                        mesh.material.color.setHex(0xFF5722); // Orange for valid targets
+                    }
                 }
             }
         });
@@ -1147,7 +1239,7 @@ class SnubDodecahedronGame {
         
         const actions = [
             { name: 'Move', action: 'move', enabled: true },
-            { name: 'Shoot', action: 'shoot', enabled: false },
+            { name: 'Shoot', action: 'shoot', enabled: true },
             { name: 'Build', action: 'build', enabled: false }
         ];
         
@@ -1197,22 +1289,180 @@ class SnubDodecahedronGame {
     private showActionFeedback(action: string): void {
         const feedback = document.createElement('div');
         feedback.style.position = 'absolute';
-        feedback.style.top = '50%';
+        feedback.style.bottom = '100px';
         feedback.style.left = '50%';
-        feedback.style.transform = 'translate(-50%, -50%)';
+        feedback.style.transform = 'translateX(-50%)';
         feedback.style.backgroundColor = 'rgba(33, 150, 243, 0.9)';
         feedback.style.color = 'white';
         feedback.style.padding = '20px';
         feedback.style.borderRadius = '5px';
         feedback.style.fontSize = '18px';
         feedback.style.zIndex = '1002';
-        feedback.textContent = `${action} mode: Click an adjacent face twice to confirm`;
+        
+        let message = '';
+        if (action === 'Move') {
+            message = `${action} mode: Click an adjacent face twice to confirm`;
+        } else if (action === 'Shoot') {
+            const range = this.getShootingRange();
+            message = `${action} mode: Click an enemy unit within ${range} spaces`;
+        } else {
+            message = `${action} mode activated`;
+        }
+        
+        feedback.textContent = message;
         
         document.body.appendChild(feedback);
         
         setTimeout(() => {
             feedback.remove();
         }, 2000);
+    }
+    
+    private getEnemyTargetsAtClick(event: MouseEvent): (Rover | Building)[] {
+        this.updateMousePosition(event);
+        this.raycaster.setFromCamera(this.mouse, this.camera);
+        
+        const unitMeshes: any[] = [];
+        const units: (Rover | Building)[] = [];
+        
+        // Check enemy rovers
+        this.roverMeshes.forEach((mesh, rover) => {
+            if (rover.player !== this.gameState.currentPlayer) {
+                unitMeshes.push(mesh);
+                units.push(rover);
+            }
+        });
+        
+        // Check enemy buildings
+        this.buildingMeshes.forEach((mesh, building) => {
+            if (building.player !== this.gameState.currentPlayer) {
+                unitMeshes.push(mesh);
+                units.push(building);
+            }
+        });
+        
+        const intersects = this.raycaster.intersectObjects(unitMeshes);
+        const targets: (Rover | Building)[] = [];
+        
+        if (intersects.length > 0) {
+            const hitMesh = intersects[0].object;
+            
+            // Find which unit was hit
+            this.roverMeshes.forEach((mesh, rover) => {
+                if (mesh === hitMesh && rover.player !== this.gameState.currentPlayer) {
+                    targets.push(rover);
+                }
+            });
+            
+            this.buildingMeshes.forEach((mesh, building) => {
+                if (mesh === hitMesh && building.player !== this.gameState.currentPlayer) {
+                    targets.push(building);
+                }
+            });
+        }
+        
+        return targets;
+    }
+    
+    private attemptShoot(target: Rover | Building): void {
+        if (!this.selectedRover) return;
+        
+        // Calculate distance
+        const distance = SnubDodecahedronGeometry.calculateDistance(
+            this.selectedRover.faceId,
+            target.faceId,
+            this.faceAdjacencyMap
+        );
+        
+        // Check range (3 spaces, or more from HQ)
+        const maxRange = this.getShootingRange();
+        
+        if (distance > maxRange || distance < 1) {
+            this.showMoveFeedback(`Target out of range (${distance} spaces, max ${maxRange})`, false);
+            return;
+        }
+        
+        // Roll dice (1d6, hit on 4+)
+        const roll = Math.floor(Math.random() * 6) + 1;
+        const isHit = roll >= 4;
+        
+        if (isHit) {
+            // Deal damage
+            target.hitPoints -= 1;
+            
+            if (target.hitPoints <= 0) {
+                // Remove unit
+                if (target.type === 'rover') {
+                    const index = this.gameState.rovers.indexOf(target as Rover);
+                    if (index > -1) {
+                        this.gameState.rovers.splice(index, 1);
+                        const mesh = this.roverMeshes.get(target as Rover);
+                        if (mesh) {
+                            this.scene.remove(mesh);
+                            this.roverMeshes.delete(target as Rover);
+                        }
+                    }
+                } else {
+                    const index = this.gameState.buildings.indexOf(target as Building);
+                    if (index > -1) {
+                        this.gameState.buildings.splice(index, 1);
+                        const mesh = this.buildingMeshes.get(target as Building);
+                        if (mesh) {
+                            this.scene.remove(mesh);
+                            this.buildingMeshes.delete(target as Building);
+                        }
+                    }
+                }
+                
+                this.showShootFeedback(`Hit! (rolled ${roll}) - Target destroyed!`, true);
+            } else {
+                this.showShootFeedback(`Hit! (rolled ${roll}) - ${target.hitPoints} HP remaining`, true);
+            }
+        } else {
+            this.showShootFeedback(`Miss! (rolled ${roll}, needed 4+)`, false);
+        }
+        
+        // Reset action mode
+        this.selectedRover = null;
+        this.actionMode = 'none';
+        
+        // End turn
+        this.endTurn();
+    }
+    
+    private getShootingRange(): number {
+        if (!this.selectedRover) return GAME_CONSTANTS.SHOOT_RANGE;
+        
+        // Check if we're on an HQ space
+        const isOnHQ = SnubDodecahedronGeometry.getFaceType(this.selectedRover.faceId) === 'pentagon';
+        
+        if (isOnHQ) {
+            return GAME_CONSTANTS.SHOOT_RANGE + GAME_CONSTANTS.HQ_RANGE_COST;
+        }
+        
+        return GAME_CONSTANTS.SHOOT_RANGE;
+    }
+    
+    private showShootFeedback(message: string, success: boolean): void {
+        const feedback = document.createElement('div');
+        feedback.style.position = 'absolute';
+        feedback.style.bottom = '120px';
+        feedback.style.left = '50%';
+        feedback.style.transform = 'translateX(-50%)';
+        feedback.style.backgroundColor = success ? 'rgba(76, 175, 80, 0.9)' : 'rgba(244, 67, 54, 0.9)';
+        feedback.style.color = 'white';
+        feedback.style.padding = '20px';
+        feedback.style.borderRadius = '5px';
+        feedback.style.fontSize = '20px';
+        feedback.style.fontWeight = 'bold';
+        feedback.style.zIndex = '1003';
+        feedback.textContent = message;
+        
+        document.body.appendChild(feedback);
+        
+        setTimeout(() => {
+            feedback.remove();
+        }, 2500);
     }
 }
 
