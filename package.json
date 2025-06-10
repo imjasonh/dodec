@@ -8,12 +8,20 @@
     "dev": "tsc --watch",
     "start": "npm run build && open index.html"
   },
-  "keywords": ["three.js", "typescript", "3d", "game", "polyhedron"],
+  "keywords": [
+    "three.js",
+    "typescript",
+    "3d",
+    "game",
+    "polyhedron"
+  ],
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "typescript": "^5.0.0",
-    "@types/three": "^0.128.0"
+    "@types/three": "^0.128.0",
+    "typescript": "^5.0.0"
   },
-  "dependencies": {}
+  "dependencies": {
+    "polyhedra": "^1.0.0"
+  }
 }
