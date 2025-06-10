@@ -36,10 +36,10 @@ interface GameConfig {
 const DEFAULT_CONFIG: GameConfig = {
     cameraPosition: { x: 5, y: 5, z: 5 },
     colors: {
-        triangle: 0x4CAF50,
-        pentagon: 0x2196F3,
-        hover: 0xFFEB3B,
-        selected: 0xF44336,
+        triangle: 0xBDBDBD,
+        pentagon: 0x9E9E9E,
+        hover: 0x42A5F5,
+        selected: 0x2196F3,
         wireframe: 0xffffff,
         background: 0x111111
     },
