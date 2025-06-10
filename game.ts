@@ -25,6 +25,8 @@ interface GameConfig {
         readonly selected: number;
         readonly wireframe: number;
         readonly background: number;
+        readonly playerRed: number;
+        readonly playerGreen: number;
     };
     readonly lighting: {
         readonly ambient: { color: number; intensity: number };
@@ -41,7 +43,9 @@ const DEFAULT_CONFIG: GameConfig = {
         hover: 0x42A5F5,
         selected: 0x2196F3,
         wireframe: 0xffffff,
-        background: 0x111111
+        background: 0x111111,
+        playerRed: 0xF44336,
+        playerGreen: 0x4CAF50
     },
     lighting: {
         ambient: { color: 0x404040, intensity: 1.8 },
@@ -61,6 +65,26 @@ interface SnubDodecahedronData {
     vertices: number[][];
     triangles: number[][];
     pentagons: number[][];
+}
+
+// Game state types
+type Player = 'red' | 'green';
+
+interface GameState {
+    currentPlayer: Player;
+    playerPositions: {
+        red: number;
+        green: number;
+    };
+    moveHistory: number[];
+    gameStarted: boolean;
+}
+
+// Serializable game data for network/save
+interface SerializedGameData {
+    version: string;
+    timestamp: number;
+    state: GameState;
 }
 
 // Exact face connectivity data from George Hart's Virtual Polyhedra
@@ -248,6 +272,42 @@ class SnubDodecahedronGeometry {
             pentagons: SNUB_DODECAHEDRON_DATA.pentagons
         };
     }
+
+    static buildFaceAdjacencyMap(): Map<number, Set<number>> {
+        const adjacencyMap = new Map<number, Set<number>>();
+        const allFaces = [
+            ...SNUB_DODECAHEDRON_DATA.triangles,
+            ...SNUB_DODECAHEDRON_DATA.pentagons
+        ];
+
+        // Initialize all faces
+        for (let i = 0; i < allFaces.length; i++) {
+            adjacencyMap.set(i, new Set<number>());
+        }
+
+        // Two faces are adjacent if they share exactly 2 vertices
+        for (let i = 0; i < allFaces.length; i++) {
+            for (let j = i + 1; j < allFaces.length; j++) {
+                const face1 = allFaces[i];
+                const face2 = allFaces[j];
+
+                // Count shared vertices
+                let sharedVertices = 0;
+                for (const v1 of face1) {
+                    if (face2.includes(v1)) {
+                        sharedVertices++;
+                    }
+                }
+
+                if (sharedVertices === 2) {
+                    adjacencyMap.get(i)!.add(j);
+                    adjacencyMap.get(j)!.add(i);
+                }
+            }
+        }
+
+        return adjacencyMap;
+    }
 }
 
 // Utility functions (pure and testable)
@@ -337,6 +397,11 @@ class SnubDodecahedronGame {
     private controls: any;
     private config: GameConfig;
 
+    // Game state
+    private gameState: GameState;
+    private faceAdjacencyMap: Map<number, Set<number>>;
+    private playerMeshes: Map<Player, any> = new Map();
+
     constructor(config: GameConfig = DEFAULT_CONFIG) {
         this.config = config;
         this.scene = new THREE.Scene();
@@ -344,6 +409,20 @@ class SnubDodecahedronGame {
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
         this.raycaster = new THREE.Raycaster();
         this.mouse = new THREE.Vector2();
+
+        // Initialize game state
+        this.gameState = {
+            currentPlayer: 'red',
+            playerPositions: {
+                red: Math.floor(Math.random() * 92),
+                green: Math.floor(Math.random() * 92)
+            },
+            moveHistory: [],
+            gameStarted: false
+        };
+
+        // Build adjacency map
+        this.faceAdjacencyMap = SnubDodecahedronGeometry.buildFaceAdjacencyMap();
 
         this.init();
     }
@@ -355,6 +434,8 @@ class SnubDodecahedronGame {
         this.createSnubDodecahedron();
         this.setupLighting();
         this.setupEventListeners();
+        this.createPlayerPieces();
+        this.startGame();
         this.animate();
     }
 
@@ -569,18 +650,113 @@ class SnubDodecahedronGame {
 
     protected onFaceSelected(face: any): void {
         const userData = face.userData as FaceUserData;
-        console.log(`Face ${userData.faceId} clicked! Add your game logic here.`);
+        const faceId = userData.faceId;
 
-        this.animateFaceSelection(face);
+        if (this.gameState.gameStarted) {
+            this.attemptMove(faceId);
+        }
     }
 
-    private animateFaceSelection(face: any): void {
-        const originalScale = face.scale.clone();
-        face.scale.multiplyScalar(1.2);
+    private createPlayerPieces(): void {
+        // Create spheres for player pieces
+        const sphereGeometry = new THREE.SphereGeometry(0.1, 32, 16);
 
-        setTimeout(() => {
-            face.scale.copy(originalScale);
-        }, 200);
+        // Red player
+        const redMaterial = new THREE.MeshLambertMaterial({
+            color: this.config.colors.playerRed
+        });
+        const redSphere = new THREE.Mesh(sphereGeometry, redMaterial);
+        this.playerMeshes.set('red', redSphere);
+        this.scene.add(redSphere);
+
+        // Green player
+        const greenMaterial = new THREE.MeshLambertMaterial({
+            color: this.config.colors.playerGreen
+        });
+        const greenSphere = new THREE.Mesh(sphereGeometry, greenMaterial);
+        this.playerMeshes.set('green', greenSphere);
+        this.scene.add(greenSphere);
+
+        // Position players at their starting faces
+        this.updatePlayerPositions();
+    }
+
+    private updatePlayerPositions(): void {
+        ['red', 'green'].forEach((player) => {
+            const playerKey = player as Player;
+            const position = this.gameState.playerPositions[playerKey];
+            const mesh = this.playerMeshes.get(playerKey);
+
+            if (mesh && this.faces[position]) {
+                // Get center of face
+                const face = this.faces[position];
+                const center = new THREE.Vector3();
+                face.geometry.computeBoundingBox();
+                face.geometry.boundingBox.getCenter(center);
+                face.localToWorld(center);
+
+                // Offset slightly outward from face
+                const normal = center.clone().normalize();
+                center.add(normal.multiplyScalar(0.1));
+
+                mesh.position.copy(center);
+            }
+        });
+    }
+
+    private attemptMove(targetFaceId: number): void {
+        const currentPlayer = this.gameState.currentPlayer;
+        const currentPosition = this.gameState.playerPositions[currentPlayer];
+
+        // Check if move is valid (adjacent face)
+        const adjacentFaces = this.faceAdjacencyMap.get(currentPosition);
+        if (!adjacentFaces || !adjacentFaces.has(targetFaceId)) {
+            console.log('Invalid move: not adjacent');
+            return;
+        }
+
+        // Check if face is occupied by other player
+        const otherPlayer: Player = currentPlayer === 'red' ? 'green' : 'red';
+        if (this.gameState.playerPositions[otherPlayer] === targetFaceId) {
+            console.log('Invalid move: face occupied');
+            return;
+        }
+
+        // Make the move
+        this.gameState.playerPositions[currentPlayer] = targetFaceId;
+        this.gameState.moveHistory.push(targetFaceId);
+        this.updatePlayerPositions();
+
+        // Switch players
+        this.gameState.currentPlayer = otherPlayer;
+        this.updateUI();
+    }
+
+    private startGame(): void {
+        this.gameState.gameStarted = true;
+        this.updateUI();
+    }
+
+    private updateUI(): void {
+        const info = document.getElementById('face-info');
+        if (info) {
+            info.textContent = `Current player: ${this.gameState.currentPlayer.toUpperCase()}`;
+        }
+    }
+
+    // Serialization methods
+    public exportGameState(): SerializedGameData {
+        return {
+            version: '1.0.0',
+            timestamp: Date.now(),
+            state: { ...this.gameState }
+        };
+    }
+
+    public importGameState(data: SerializedGameData): void {
+        this.gameState = { ...data.state };
+        this.updatePlayerPositions();
+        this.updateUI();
     }
 
     private animate(): void {

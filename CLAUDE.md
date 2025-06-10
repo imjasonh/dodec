@@ -27,10 +27,14 @@ A web-based 3D snub dodecahedron game built with Three.js and TypeScript. The sn
 - ✅ Mathematically accurate snub dodecahedron with 92 faces
 - ✅ Interactive rotation with mouse drag
 - ✅ Face selection and highlighting
-- ✅ Different colors for triangles (green) and pentagons (blue)
+- ✅ Different colors for triangles (gray) and pentagons (darker gray)
 - ✅ No visible edges (wireframe opacity = 0)
 - ✅ Bright lighting on all sides
 - ✅ Fully opaque faces
+- ✅ Two-player turn-based game (red vs green)
+- ✅ Players can only move to adjacent faces
+- ✅ Collision detection (players cannot occupy same face)
+- ✅ Game state serialization for save/load functionality
 
 ### Development Commands
 - Build: `npm run build` or `npx tsc`
@@ -42,10 +46,22 @@ A web-based 3D snub dodecahedron game built with Three.js and TypeScript. The sn
 - @types/three (dev)
 - polyhedra (for geometry data)
 
+## Game Rules
+- Two players (Red and Green) take turns moving
+- Players start at random positions on the polyhedron
+- On each turn, a player can move to any adjacent face (sharing an edge)
+- Players cannot move to faces occupied by the other player
+- Click on an adjacent face to move there
+
+## API Methods
+- `exportGameState()`: Returns serialized game data for saving
+- `importGameState(data)`: Loads a saved game state
+
 ## Next Steps
-The game foundation is complete. Possible enhancements:
-- Add game mechanics (scoring, objectives)
+- Add win conditions
+- Add move history visualization
+- Add undo/redo functionality
+- Add network multiplayer support
+- Add AI opponent
+- Add animations for piece movement
 - Add sound effects
-- Add animations
-- Add texture mapping
-- Add multiplayer support
